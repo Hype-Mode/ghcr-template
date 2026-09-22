@@ -16,6 +16,12 @@
 #   comfyui/base:latest                    CUDA-only; no Python/ComfyUI, ~13.5 GB, stale (2024-03)
 #   runpod/worker-comfyui                  serverless worker wrapper; reported fragile when layered
 #   ghcr.io/saladtechnologies/comfyui-api  bundles an API server we do not need
+#   vastai/comfy:v0.37.0-*                 Vast's own ai-dock image; NOT drop-in. It runs a
+#                                          supervisor entrypoint and the `comfyui-json` backend on
+#                                          port 18188, keeps ComfyUI deps in /venv/main, and
+#                                          auto-boots ComfyUI — layering our manifest bootstrap
+#                                          onto it fights all of that. Kept as a selectable
+#                                          fallback via --build-arg COMFYUI_BASE_IMAGE only.
 #
 # Build:
 #   docker buildx build worker -f worker/Dockerfile \
@@ -70,15 +76,23 @@ RUN pip install \
         --index-url ${TORCH_INDEX_URL} \
     && pip install -r ${COMFYUI_HOME}/requirements.txt
 
-# Bootstrap + version stamp.
+# Bootstrap + headless runner (control server + sequential task runner).
 COPY bootstrap/ ${COMFRANCH_HOME}/bootstrap/
+COPY runner/ ${COMFRANCH_HOME}/runner/
 COPY VERSION ${COMFRANCH_HOME}/VERSION
 COPY entrypoint.sh ${COMFRANCH_HOME}/entrypoint.sh
-RUN chmod +x ${COMFRANCH_HOME}/entrypoint.sh ${COMFRANCH_HOME}/bootstrap/comfyranch_bootstrap.py
+RUN chmod +x ${COMFRANCH_HOME}/entrypoint.sh \
+        ${COMFRANCH_HOME}/bootstrap/comfyranch_bootstrap.py \
+        ${COMFRANCH_HOME}/runner/runner.py \
+        ${COMFRANCH_HOME}/runner/control_server.py
 
 ENV COMFY_DIR=${COMFYUI_HOME} \
-    COMFRANCH_PORT=8188
+    COMFRANCH_PORT=8188 \
+    COMFRANCH_CONTROL_PORT=8189 \
+    COMFRANCH_RUNNER_DIR=${COMFRANCH_HOME}/runner \
+    COMFRANCH_AUTOMATION_DIR=/workspace/automation \
+    COMFRANCH_LOG_DIR=/workspace/logs
 
-EXPOSE 8188
+EXPOSE 8188 8189
 WORKDIR ${COMFYUI_HOME}
 ENTRYPOINT ["/opt/comfyranch/entrypoint.sh"]
